@@ -1,6 +1,6 @@
 from core.base_module import BaseModule
 from core.context import RunContext
-from core.utils import run, run_raw, is_writable, parse_sudo_version
+from core.utils import run_raw, is_writable, parse_sudo_version
 
 class Module(BaseModule):
     name = "system_info"
