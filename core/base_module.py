@@ -22,6 +22,15 @@ class Finding:
             "detail": self.detail,
             "reference": self.reference,
         }
+    
+    def from_dict(cls, data: dict) -> "Finding":
+        return cls(
+            severity=data["severity"],
+            module=data["module"],
+            title=data["title"],
+            detail=data["detail"],
+            reference=data["reference"],
+        )
 
 
 @dataclass
@@ -32,6 +41,12 @@ class RawOutput:
 
     def to_dict(self) -> dict:
         return {"label": self.label, "content": self.content}
+    
+    def from_dict(cls, data: dict) -> "RawOutput":
+        return cls(
+            label=data["label"],
+            content=data["content"],
+        )
 
 
 class BaseModule:
@@ -51,7 +66,7 @@ class BaseModule:
         """Gather raw data from the system. Store in self attributes."""
         raise NotImplementedError
 
-    def analyse(self, ctx: RunContext) -> None:
+    def analyse(self, collect_report: dict) -> None:
         """Inspect collected data, call add_finding() for anything notable."""
         raise NotImplementedError
 
@@ -86,10 +101,10 @@ class BaseModule:
             return False, f"missing tools: {', '.join(missing)}"
         return True, ""
 
-    def run(self, ctx: RunContext) -> None:
+    '''def run(self, ctx: RunContext) -> None:
         """Called by the runner. Executes collect then analyse."""
         self.collect(ctx)
-        self.analyse(ctx)
+        self.analyse(ctx)'''
 
     def sorted_findings(self) -> list[Finding]:
         return sorted(self.findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 99))

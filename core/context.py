@@ -1,7 +1,6 @@
 """System context detected at startup."""
 
 import os
-import shutil
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -66,7 +65,32 @@ class RunContext:
             "container_type": self.container_type,
             "kernel": self.kernel_version,
             "os": self.os_pretty,
+            "gid": self.gid,
+            "groups": self.groups,
+            "effective_uid": self.effective_uid,
+            "tools": list(self.tools),
+            "arch": self.arch
         }
+    
+    @classmethod
+    def from_summary(cls, data: dict) -> "RunContext":
+        return cls(
+            run_id=data["run_id"],
+            timestamp=datetime.fromisoformat(data["timestamp"]),
+            hostname=data["hostname"],
+            username=data["username"],
+            uid=data["uid"],
+            is_root=data["is_root"],
+            is_container=data["is_container"],
+            container_type=data["container_type"],
+            kernel_version=data["kernel"],
+            os_pretty=data["os"],
+            gid=data["gid"],
+            groups=data["groups"],
+            effective_uid=data["effective_uid"],
+            tools=set(data["tools"]),
+            arch=data["arch"],
+        )
 
 
 def _detect_container() -> tuple[bool, Optional[str]]:

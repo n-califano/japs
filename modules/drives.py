@@ -8,18 +8,24 @@ class Module(BaseModule):
     tags = ["basic"]
 
     def collect(self, ctx: RunContext) -> None:
-        self.dev_disks      = run_raw("ls /dev 2>/dev/null | grep -i 'sd'")
-        self.fstab          = run_raw("cat /etc/fstab 2>/dev/null | grep -v '^#' | grep -Pv '\\W*\\#'")
-        self.fstab_creds    = run_raw("grep -E '(user|username|login|pass|password|pw|credentials)[=:]' /etc/fstab /etc/mtab 2>/dev/null")
+        self.dev_disks = run_raw("ls /dev 2>/dev/null | grep -i 'sd'")
+        self.add_raw("Block devices (/dev/sd*)", self.dev_disks)
 
-    def analyse(self, ctx: RunContext) -> None:
+        self.fstab = run_raw("cat /etc/fstab 2>/dev/null | grep -v '^#' | grep -Pv '\\W*\\#'")
+        self.add_raw("/etc/fstab (comments stripped)", self.fstab)
+
+        self.fstab_creds = run_raw("grep -E '(user|username|login|pass|password|pw|credentials)[=:]' /etc/fstab /etc/mtab 2>/dev/null")
+        self.add_raw("Credentials found in fstab/mtab", self.fstab_creds)
+
+    def analyse(self, collect_report: dict) -> None:
+        self._populate_class(collect_report["raw_output"][self.name])
+
         self._analyse_block_devices()
         self._analyse_mounts()
         
 
     def _analyse_mounts(self):
         if self.fstab:
-            self.add_raw("/etc/fstab (comments stripped)", self.fstab)
             # Flag world-writable or noexec-less NFS/CIFS mounts as noteworthy
             for line in self.fstab.strip().splitlines():
                 parts = line.split()
@@ -37,7 +43,6 @@ class Module(BaseModule):
                     )
 
         if self.fstab_creds:
-            self.add_raw("Credentials found in fstab/mtab", self.fstab_creds)
             self.add_finding(
                 "HIGH",
                 "Plaintext credentials found in /etc/fstab or /etc/mtab",
@@ -48,7 +53,6 @@ class Module(BaseModule):
 
     def _analyse_block_devices(self):
         if self.dev_disks:
-            self.add_raw("Block devices (/dev/sd*)", self.dev_disks)
             disk_list = self.dev_disks.strip().splitlines()
             # Partitions have a digit suffix (sda1, sdb2…), bare disks don't (sda, sdb…)
             bare_disks  = [d for d in disk_list if not d[-1].isdigit()]
@@ -67,3 +71,10 @@ class Module(BaseModule):
                     "Unmounted partitions may contain sensitive data; "
                     "cross-reference with fstab to spot anything not auto-mounted"
                 )
+
+    def _populate_class(self, raw_data_dict: dict):
+        get = lambda key: raw_data_dict.get(key, "")
+
+        self.dev_disks      = get("Block devices (/dev/sd*)")
+        self.fstab          = get("/etc/fstab (comments stripped)")
+        self.fstab_creds    = get("Credentials found in fstab/mtab")

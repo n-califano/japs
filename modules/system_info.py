@@ -1,4 +1,4 @@
-from core.base_module import BaseModule
+from core.base_module import BaseModule, RawOutput
 from core.context import RunContext
 from core.utils import run_raw, is_writable, parse_sudo_version
 
@@ -19,7 +19,9 @@ class Module(BaseModule):
         self._collect_printers()
         self._collect_defenses()
         
-    def analyse(self, ctx: RunContext) -> None:
+    def analyse(self, collect_report: dict) -> None:
+        self._populate_class(collect_report["raw_output"][self.name])
+
         self._analyse_os_info()
         self._analyse_path()
         self._analyse_env_info()
@@ -39,37 +41,39 @@ class Module(BaseModule):
             run_raw("apparmor_status 2>/dev/null") or
             run_raw("ls -d /etc/apparmor* 2>/dev/null")
         )
+        self.add_raw("AppArmor", self.apparmor)
 
         # SELinux
         self.selinux = run_raw("sestatus 2>/dev/null")
+        self.add_raw("SELinux", self.selinux)
 
         # Grsecurity
         self.grsec = (
             run_raw("uname -r 2>/dev/null | grep -i grsec") or
             run_raw("grep -s 'grsecurity' /etc/sysctl.conf 2>/dev/null")
         )
+        self.add_raw("Grsecurity", self.grsec)
 
         # PaX
         self.pax = run_raw("which paxctl-ng paxctl 2>/dev/null")
+        self.add_raw("PaX", self.pax)
 
         # Execshield
         self.execshield = run_raw("grep 'exec-shield' /etc/sysctl.conf 2>/dev/null")
+        self.add_raw("Execshield", self.execshield)
 
         # ASLR
         self.aslr = run_raw("cat /proc/sys/kernel/randomize_va_space 2>/dev/null")
+        self.add_raw("ASLR (randomize_va_space)", self.aslr)
 
     def _analyse_defenses(self):
         # AppArmor
         if "not have enough privilege" in self.apparmor.lower() or "loaded" in self.apparmor.lower():
             self.add_finding("INFO", "AppArmor is loaded, profile details require root")
-            self.add_raw("AppArmor", self.apparmor)
-        else:
-            self.add_raw("AppArmor", self.apparmor)
 
         # SELinux
         if self.selinux and "disabled" not in self.selinux.lower():
             self.add_finding("INFO", "SELinux is present, profile details require root")
-            self.add_raw("SELinux", self.selinux)
 
         # Combined absence check: neither AppArmor nor SELinux present at all
         if not self.apparmor and (not self.selinux or "disabled" in self.selinux.lower()):
@@ -79,21 +83,17 @@ class Module(BaseModule):
         # Grsecurity
         if self.grsec:
             self.add_finding("INFO", "Grsecurity detected", "Kernel hardening is active: memory corruption exploits are significantly harder")
-            self.add_raw("Grsecurity", self.grsec)
 
         # PaX
         if self.pax:
             self.add_finding("INFO", "PaX detected", "Memory protection is active: RWX memory pages restricted")
-            self.add_raw("PaX", self.pax)
 
         # Execshield
         if self.execshield:
-            self.add_raw("Execshield", self.execshield)
             self.add_finding("INFO", "Execshield is configured", "Legacy non-executable stack protection: relevant only on very old systems")
 
         # ASLR
         if self.aslr:
-            self.add_raw("ASLR (randomize_va_space)", self.aslr)
             if self.aslr.strip() == "0":
                 self.add_finding("HIGH","ASLR is disabled (randomize_va_space=0)",
                     "Memory addresses are predictable: memory corruption exploits do not need address leaks\n"
@@ -106,18 +106,19 @@ class Module(BaseModule):
 
     def _collect_printers(self):
         self.printers     = run_raw("lpstat -a 2>/dev/null")
+        self.add_raw("lpstat -a", self.printers)
+
         self.cups_version = run_raw("cups-config --version 2>/dev/null")
+        self.add_raw("CUPS version", self.cups_version)
+
         self.cups_service = run_raw("systemctl is-active cups 2>/dev/null")
+        self.add_raw("CUPS service", self.cups_service)
 
     def _analyse_printers(self):
-        if self.printers:
-            self.add_raw("lpstat -a", self.printers)
-
         cups_running = self.cups_service.strip() == "active"
         cups_present = bool(self.cups_version)
 
         if cups_running:
-            self.add_raw("CUPS version", self.cups_version)
             self.add_finding(
                 "INFO",
                 f"CUPS printing service is active (version {self.cups_version})",
@@ -136,10 +137,9 @@ class Module(BaseModule):
    
     def _collect_cpu(self):
         self.cpu = run_raw("lscpu 2>/dev/null")
-
-    def _analyse_cpu(self):
         self.add_raw("lscpu", self.cpu)
 
+    def _analyse_cpu(self):
         VM_INDICATORS = {
             "KVM":          "KVM hypervisor",
             "QEMU":         "QEMU virtualisation",
@@ -168,12 +168,12 @@ class Module(BaseModule):
 
     def _collect_stats(self):
         self.df      = run_raw("df -h 2>/dev/null")
-        self.lsblk   = run_raw("lsblk 2>/dev/null")
-
-    def _analyse_stats(self):
         self.add_raw("df -h", self.df)
+
+        self.lsblk   = run_raw("lsblk 2>/dev/null")
         self.add_raw("lsblk", self.lsblk)
 
+    def _analyse_stats(self):
         # Flag NFS mounts: no_root_squash is a privesc vector
         nfs_mounts = [
             line for line in self.df.splitlines()
@@ -189,16 +189,17 @@ class Module(BaseModule):
 
     def _collect_date(self):
         self.date = run_raw("date 2>/dev/null")
+        self.add_raw("date", self.date)
 
     def _analyse_date(self):
-        self.add_raw("date", self.date)
+        pass
 
     def _collect_dmesg(self):
         self.dmesg_sig = run_raw("dmesg 2>/dev/null | grep -iE 'signature|taint|unsigned module'")
+        self.add_raw("dmesg signature warnings", self.dmesg_sig)
 
     def _analyse_dmesg(self):
         if self.dmesg_sig:
-            self.add_raw("dmesg signature warnings", self.dmesg_sig)
             self.add_finding(
                 "MEDIUM",
                 "Kernel module signature warnings found in dmesg",
@@ -209,12 +210,13 @@ class Module(BaseModule):
 
     def _collect_sudo(self):
         self.sudo_version_raw = run_raw("sudo -V 2>/dev/null | grep 'Sudo ver'")    #ex: "Sudo version 1.8.27"
-        self.sudo_version = parse_sudo_version(self.sudo_version_raw)
+        self.add_raw("sudo", self.sudo_version_raw)
+
         self.chroot_test = run_raw("sudo -n -R woot woot </dev/null 2>&1", timeout=3)
+        self.add_raw("chroot_escalation_test", self.chroot_test)
 
     def _analyse_sudo(self):
-        self.add_raw("sudo", self.sudo_version_raw)
-        v = self.sudo_version
+        v = parse_sudo_version(self.sudo_version_raw)
 
         # Broad check
         if v < (1, 8, 28):
@@ -232,10 +234,9 @@ class Module(BaseModule):
 
     def _collect_env_info(self):
         self.env_output = run_raw("(env || set) 2>/dev/null")
-
-    def _analyse_env_info(self):
         self.add_raw("env", self.env_output)
 
+    def _analyse_env_info(self):
         SENSITIVE_KEYWORDS = ["PASS", "SECRET", "TOKEN", "API_KEY", "CREDENTIAL", "AUTH", "PRIVATE"]
 
         sensitive = [
@@ -254,12 +255,12 @@ class Module(BaseModule):
 
     def _collect_path(self):
         self.path_raw = run_raw("echo $PATH")
-        self.path_dirs = self.path_raw.split(":")
-
-    def _analyse_path(self):
         self.add_raw("$PATH", self.path_raw)
 
-        writable = [d for d in self.path_dirs if d and is_writable(d)]
+    def _analyse_path(self):
+        path_dirs = self.path_raw.split(":")
+
+        writable = [d for d in path_dirs if d and is_writable(d)]
         for d in writable:
             self.add_finding(
                 "MEDIUM",
@@ -270,17 +271,45 @@ class Module(BaseModule):
         
     def _collect_os_info(self):
         self.proc_version  = run_raw("cat /proc/version")
+        self.add_raw("/proc/version", self.proc_version)
+        
         self.uname         = run_raw("uname -a")
+        self.add_raw("uname -a",      self.uname)
+
         self.os_release    = run_raw("cat /etc/os-release")
+        self.add_raw("/etc/os-release", self.os_release)
+
         self.lsb_release   = run_raw("lsb_release -a")
+        self.add_raw("lsb_release -a", self.lsb_release)
 
     def _analyse_os_info(self):
-        self.add_raw("/proc/version", self.proc_version)
-        self.add_raw("uname -a",      self.uname)
-        self.add_raw("/etc/os-release", self.os_release)
-        if self.lsb_release:   # only show if available
-            self.add_raw("lsb_release -a", self.lsb_release)
-
+        pass    
     
     def _is_chroot_vulnerable(self) -> bool:
         return "No such file or directory" in self.chroot_test
+    
+    def _populate_class(self, raw_data_dict: dict):
+        get = lambda key: raw_data_dict.get(key, "")
+
+        self.apparmor         = get("AppArmor")
+        self.selinux          = get("SELinux")
+        self.grsec            = get("Grsecurity")
+        self.pax              = get("PaX")
+        self.execshield       = get("Execshield")
+        self.aslr             = get("ASLR (randomize_va_space)")
+        self.printers         = get("lpstat -a")
+        self.cups_version     = get("CUPS version")
+        self.cups_service     = get("CUPS service")
+        self.cpu              = get("lscpu")
+        self.df               = get("df -h")
+        self.lsblk            = get("lsblk")
+        self.date             = get("date")
+        self.dmesg_sig        = get("dmesg signature warnings")
+        self.sudo_version_raw = get("sudo")
+        self.chroot_test      = get("chroot_escalation_test")
+        self.env_output       = get("env")
+        self.path_raw         = get("$PATH")
+        self.proc_version     = get("/proc/version")
+        self.uname            = get("uname -a")
+        self.os_release       = get("/etc/os-release")
+        self.lsb_release      = get("lsb_release -a")

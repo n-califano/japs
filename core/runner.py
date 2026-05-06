@@ -30,6 +30,7 @@ class Runner:
         only_tags: Optional[list[str]] = None,
         skip_tags: Optional[list[str]] = None,
         min_severity: Optional[str] = None,
+        mode: str = None,
     ):
         self.reporter = reporter
         self.quick = quick
@@ -37,11 +38,16 @@ class Runner:
         self.only_tags = only_tags or []
         self.skip_tags = skip_tags or []
         self.min_severity = min_severity
+        self.mode = mode
 
-    def run(self, ctx: RunContext) -> None:
+    def run(self, ctx: RunContext, raw_report) -> None:
         self.reporter.print_banner(ctx)
         modules = self._select_modules(_discover_modules())
 
+        collect_report = None
+        if raw_report:
+            collect_report = self.reporter.load_report(raw_report)
+        
         for module in modules:
             self.reporter.print_module_header(module)
 
@@ -51,16 +57,18 @@ class Runner:
                 self.reporter.print_module_skipped(module, reason)
                 continue
 
-            # Run collect + analyse
             try:
-                module.run(ctx)
+                if self.mode == "collect":
+                    module.collect(ctx)
+                elif self.mode == "analyse":
+                    module.analyse(collect_report)
             except Exception as e:
                 self.reporter.print_module_skipped(module, f"error: {e}")
                 continue
 
-            self.reporter.print_module_results(module)
+            self.reporter.print_module_results(module, self.mode)
 
-        self.reporter.print_summary()
+        self.reporter.print_summary(self.mode)
         self.reporter.write_reports()
 
     def _select_modules(self, modules: list[BaseModule]) -> list[BaseModule]:

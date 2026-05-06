@@ -35,6 +35,7 @@ class Module(BaseModule):
         # which for every binary in one shell invocation
         binary_list = " ".join(USEFUL_BINARIES)
         self.found_binaries_raw = run_raw(f"which {binary_list} 2>/dev/null")
+        self.add_raw("Useful binaries found", self.found_binaries_raw)
 
         # compiler detection: covers Debian (dpkg), RHEL (yum), and fallback (locate)
         self.compilers_raw = run_raw(
@@ -42,18 +43,23 @@ class Module(BaseModule):
             "|| yum list installed 'gcc*' 2>/dev/null | grep gcc) ; "
             "which gcc g++ 2>/dev/null || locate -r '/gcc[0-9\\.-]\\+$' 2>/dev/null | grep -v '/doc/'"
         )
-        # full package list, kept raw for grepping, not printed whole
-        self.packages_dpkg = run_raw("dpkg -l 2>/dev/null")
-        self.packages_rpm  = run_raw("rpm -qa 2>/dev/null")
+        self.add_raw("Compilers detected", self.compilers_raw)
 
-    def analyse(self, ctx: RunContext) -> None:
+        # full package list
+        self.packages_dpkg = run_raw("dpkg -l 2>/dev/null")
+        self.add_raw("dpkg_list", self.packages_dpkg)
+        
+        self.packages_rpm  = run_raw("rpm -qa 2>/dev/null")
+        self.add_raw("rpm_list", self.packages_rpm)
+
+    def analyse(self, collect_report: dict) -> None:
+        self._populate_class(collect_report["raw_output"][self.name])
+
         # Binaries
         found = []
         if self.found_binaries_raw:
             # `which` returns one resolved path per line
             found = [p.strip() for p in self.found_binaries_raw.splitlines() if p.strip()]
-            self.add_raw("Useful binaries found", "\n".join(found))
-
             found_names = {p.split("/")[-1] for p in found}   # basename only for set lookups
 
             high     = sorted(found_names & HIGH_INTEREST)
@@ -71,8 +77,6 @@ class Module(BaseModule):
 
             # Compilers
             if self.compilers_raw or compilers:
-                if self.compilers_raw:
-                    self.add_raw("Compilers detected", self.compilers_raw)
                 self.add_finding("INFO", f"Compiler toolchain present: {', '.join(compilers) if compilers else 'see raw output'}",
                     "Kernel exploits should be compiled on the target machine (or an identical one) "
                     "to match kernel headers and glibc version: having gcc here is a significant aid"
@@ -91,10 +95,14 @@ class Module(BaseModule):
         if pkg_data:
             pkg_count = len(pkg_data.strip().splitlines())
             #TODO: should automate the finding of vulnerabilities in this pkg list (searchsploit, OSV / NVD APIs)
-            # but running api calls and doing too much processing on the target machine is not stealth
-            # consider splitting the script in two parts:
-            # - part 1: collect the informations and create a structured report (json). this is run on target
-            # - part 2: analyse the json with additional tools and produce the final report. this runs on attacking machine
             self.add_finding("INFO", f"Package list retrieved via {pkg_source} ({pkg_count} lines), manual review recommended",
                 "Look for old versions of Nagios, Exim, Sudo, screen, tmux, OpenSMTPD, etc. "
                 "Automated scanning with OpenVAS is recommended for thorough CVE coverage")
+            
+    def _populate_class(self, raw_data_dict: dict):
+        get = lambda key: raw_data_dict.get(key, "")
+
+        self.found_binaries_raw = get("Useful binaries found")
+        self.compilers_raw      = get("Compilers detected")
+        self.packages_dpkg      = get("dpkg_list")
+        self.packages_rpm       = get("rpm_list")

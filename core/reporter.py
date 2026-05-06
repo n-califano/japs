@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from core.base_module import BaseModule, Finding, SEVERITY_ORDER
+from core.base_module import BaseModule, Finding, RawOutput
 from core.context import RunContext
 
 ### ANSI colors 
@@ -74,7 +74,7 @@ class Reporter:
     def print_module_skipped(self, module: BaseModule, reason: str) -> None:
         print(f"\n  {self._c(YELLOW, f'[~] Skipping {module.name}: {reason}')}")
 
-    def print_module_results(self, module: BaseModule) -> None:
+    def print_module_results(self, module: BaseModule, mode) -> None:
         """Print findings (sorted by severity) then raw output."""
         self.modules.append(module)
 
@@ -89,7 +89,7 @@ class Reporter:
             if finding.reference:
                 print(f"           {self._c(CYAN, '→ ' + finding.reference)}")
 
-        if not module.findings:
+        if not module.findings and mode == 'analyse':
             print(f"  {self._c(GREEN, '[INFO  ]')} No findings")
 
         # Raw output below findings
@@ -100,9 +100,13 @@ class Reporter:
                 for line in raw.content.splitlines():
                     print(f"      {line}")
 
-    def print_summary(self) -> None:
+    def print_summary(self, mode) -> None:
         """Print a final findings summary across all modules."""
         all_findings = [f for m in self.modules for f in m.sorted_findings()]
+
+        if not all_findings and mode == "collect":
+            return
+
         highs   = [f for f in all_findings if f.severity == "HIGH"]
         mediums = [f for f in all_findings if f.severity == "MEDIUM"]
         info = [f for f in all_findings if f.severity == "INFO"]
@@ -132,6 +136,19 @@ class Reporter:
         self._write_json(self.output_dir / f"run_{run_id}.json")
         self._write_text(self.output_dir / f"run_{run_id}.txt")
         print(f"  Reports saved to: {self._c(CYAN, str(self.output_dir))}")
+
+    def load_report(cls, filepath: str) -> dict:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        return {
+            "context": RunContext.from_summary(data["context"]),
+            "findings": [Finding.from_dict(f) for f in data["findings"]],
+            "raw_output": {
+                module_name: {r["label"]: r["content"] for r in outputs}
+                for module_name, outputs in data["raw_output"].items()
+            },
+        }
 
     def _build_report_dict(self) -> dict:
         all_findings = [f for m in self.modules for f in m.sorted_findings()]
