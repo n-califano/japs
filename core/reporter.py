@@ -135,7 +135,7 @@ class Reporter:
         run_id = self.ctx.run_id
         self._write_json(self.output_dir / f"run_{run_id}.json")
         self._write_text(self.output_dir / f"run_{run_id}.txt")
-        print(f"  Reports saved to: {self._c(CYAN, str(self.output_dir))}")
+        print(f"  Reports saved to: {self._c(CYAN, f"{str(self.output_dir)}/run_{run_id}")}")
 
     def load_report(cls, filepath: str) -> dict:
         with open(filepath, 'r', encoding='utf-8') as f:
